@@ -245,7 +245,7 @@ func (ctx HttpClientCtx) Request(authType AuthType, verb, url string, body io.Re
 		if length > 300 {
 			withBody = false
 		}
-		drequest, err := httputil.DumpRequest(request, withBody)
+		drequest, err := dumpRequestForTrace(request, withBody)
 		log.Trace.Printf("request: %s %v", string(drequest), err)
 		if !withBody {
 			fmt.Println("body not logged")
@@ -282,6 +282,18 @@ func (ctx HttpClientCtx) Request(authType AuthType, verb, url string, body io.Re
 	default:
 		return response, fmt.Errorf("request failed with status %d", response.StatusCode)
 	}
+}
+
+func dumpRequestForTrace(request *http.Request, withBody bool) ([]byte, error) {
+	authorization := request.Header.Values("Authorization")
+	request.Header.Set("Authorization", "[REDACTED]")
+	defer func() {
+		request.Header.Del("Authorization")
+		for _, value := range authorization {
+			request.Header.Add("Authorization", value)
+		}
+	}()
+	return httputil.DumpRequest(request, withBody)
 }
 
 // IsHTTPStatusOK if the status is ok
