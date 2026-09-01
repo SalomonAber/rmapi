@@ -204,11 +204,11 @@ func (t *HashTree) IndexReader() (io.Reader, error) {
 }
 
 type HashTree struct {
-	Hash         string
-	Generation   int64
+	Hash          string
+	Generation    int64
 	SchemaVersion string
-	Docs         []*BlobDoc
-	CacheVersion int
+	Docs          []*BlobDoc
+	CacheVersion  int
 }
 
 func (t *HashTree) FindDoc(id string) (*BlobDoc, error) {
@@ -288,7 +288,7 @@ func (t *HashTree) Mirror(r RemoteStorage, maxconcurrent int) error {
 
 	rootIndexReader, err := r.GetReader(rootHash, addExt("root", archive.DocSchemaExt))
 	if err != nil {
-		return fmt.Errorf("cannot get root hash %v", err)
+		return fmt.Errorf("cannot get root hash: %w", err)
 	}
 	defer rootIndexReader.Close()
 	entries, schema, err := parseIndex(rootIndexReader)
@@ -351,7 +351,7 @@ func (t *HashTree) Mirror(r RemoteStorage, maxconcurrent int) error {
 EXIT:
 	err = wg.Wait()
 	if err != nil {
-		return fmt.Errorf("was not ok: %v", err)
+		return fmt.Errorf("mirror documents: %w", err)
 	}
 	sort.Slice(head, func(i, j int) bool { return head[i].DocumentID < head[j].DocumentID })
 	t.Docs = head

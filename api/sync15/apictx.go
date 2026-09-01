@@ -60,7 +60,7 @@ func CreateCtxWithOptions(http *transport.HttpClientCtx, options Options) (*ApiC
 	}
 	err = cacheTree.Mirror(apiStorage, concurrent)
 	if err != nil {
-		return nil, fmt.Errorf("failed to mirror %v", err)
+		return nil, fmt.Errorf("failed to mirror: %w", err)
 	}
 	if err := saveTree(cacheTree, options.CacheDir); err != nil {
 		return nil, err

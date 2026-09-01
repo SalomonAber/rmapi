@@ -3,10 +3,30 @@ package sync15
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/juruen/rmapi/transport"
 )
+
+type unauthorizedStorage struct{}
+
+func (unauthorizedStorage) GetRootIndex() (string, int64, error) {
+	return "root-hash", 1, nil
+}
+
+func (unauthorizedStorage) GetReader(string, string) (io.ReadCloser, error) {
+	return nil, transport.ErrUnauthorized
+}
+
+func TestMirrorPreservesUnauthorized(t *testing.T) {
+	err := new(HashTree).Mirror(unauthorizedStorage{}, 1)
+	if !errors.Is(err, transport.ErrUnauthorized) {
+		t.Fatalf("Mirror error = %v, want ErrUnauthorized", err)
+	}
+}
 
 func TestParseLine(t *testing.T) {
 	line := "hash:0:docid:0:993"
