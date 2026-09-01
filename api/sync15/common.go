@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
-	"path"
+	"path/filepath"
 	"sort"
 
 	"github.com/juruen/rmapi/log"
@@ -27,24 +27,26 @@ func HashEntries(entries []*Entry) (string, error) {
 	return hashStr, nil
 }
 
-func getCachedTreePath() (string, error) {
-	cachedir, err := os.UserCacheDir()
+func getCachedTreePath(cacheDir string) (string, error) {
+	if cacheDir == "" {
+		userCacheDir, err := os.UserCacheDir()
+		if err != nil {
+			return "", err
+		}
+		cacheDir = filepath.Join(userCacheDir, "rmapi")
+	}
+	err := os.MkdirAll(cacheDir, 0700)
 	if err != nil {
 		return "", err
 	}
-	rmapiFolder := path.Join(cachedir, "rmapi")
-	err = os.MkdirAll(rmapiFolder, 0700)
-	if err != nil {
-		return "", err
-	}
-	cacheFile := path.Join(rmapiFolder, "tree.cache")
+	cacheFile := filepath.Join(cacheDir, "tree.cache")
 	return cacheFile, nil
 }
 
 const cacheVersion = 3
 
-func loadTree() (*HashTree, error) {
-	cacheFile, err := getCachedTreePath()
+func loadTree(cacheDir string) (*HashTree, error) {
+	cacheFile, err := getCachedTreePath(cacheDir)
 	if err != nil {
 		return nil, err
 	}
@@ -70,8 +72,12 @@ func loadTree() (*HashTree, error) {
 }
 
 // save cached version of the tree
-func saveTree(tree *HashTree) error {
-	cacheFile, err := getCachedTreePath()
+func saveTree(tree *HashTree, cacheDirs ...string) error {
+	cacheDir := ""
+	if len(cacheDirs) > 0 {
+		cacheDir = cacheDirs[0]
+	}
+	cacheFile, err := getCachedTreePath(cacheDir)
 	log.Info.Println("Writing cache: ", cacheFile)
 	if err != nil {
 		return err

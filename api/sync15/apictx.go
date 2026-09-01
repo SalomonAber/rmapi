@@ -26,6 +26,14 @@ type ApiCtx struct {
 	ft          *filetree.FileTreeCtx
 	blobStorage *BlobStorage
 	hashTree    *HashTree
+	cacheDir    string
+}
+
+// Options configures a sync 1.5 ApiCtx.
+type Options struct {
+	// CacheDir is the directory in which tree.cache is stored. When empty,
+	// the default is os.UserCacheDir()/rmapi.
+	CacheDir string
 }
 
 // max number of concurrent requests
@@ -39,8 +47,13 @@ func init() {
 }
 
 func CreateCtx(http *transport.HttpClientCtx) (*ApiCtx, error) {
+	return CreateCtxWithOptions(http, Options{})
+}
+
+// CreateCtxWithOptions creates a sync 1.5 context with the supplied options.
+func CreateCtxWithOptions(http *transport.HttpClientCtx, options Options) (*ApiCtx, error) {
 	apiStorage := NewBlobStorage(http)
-	cacheTree, err := loadTree()
+	cacheTree, err := loadTree(options.CacheDir)
 	if err != nil {
 		fmt.Print(err)
 		return nil, err
@@ -49,9 +62,11 @@ func CreateCtx(http *transport.HttpClientCtx) (*ApiCtx, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to mirror %v", err)
 	}
-	saveTree(cacheTree)
+	if err := saveTree(cacheTree, options.CacheDir); err != nil {
+		return nil, err
+	}
 	tree := DocumentsFileTree(cacheTree)
-	return &ApiCtx{http, tree, apiStorage, cacheTree}, nil
+	return &ApiCtx{Http: http, ft: tree, blobStorage: apiStorage, hashTree: cacheTree, cacheDir: options.CacheDir}, nil
 }
 
 func (ctx *ApiCtx) Filetree() *filetree.FileTreeCtx {
@@ -73,7 +88,7 @@ func (ctx *ApiCtx) Nuke() (err error) {
 		ctx.hashTree.Docs = nil
 		ctx.hashTree.Rehash()
 		return nil
-	}, true)
+	}, true, ctx.cacheDir)
 	return err
 }
 
@@ -194,7 +209,7 @@ func (ctx *ApiCtx) CreateDir(parentId, name string, notify bool) (*model.Documen
 
 	err = Sync(ctx.blobStorage, ctx.hashTree, func(t *HashTree) error {
 		return t.Add(doc)
-	}, notify)
+	}, notify, ctx.cacheDir)
 
 	if err != nil {
 		return nil, err
@@ -211,7 +226,7 @@ func (ctx *ApiCtx) CreateDir(parentId, name string, notify bool) (*model.Documen
 }
 
 // Sync applies changes to the local tree and syncs with the remote storage
-func Sync(b *BlobStorage, tree *HashTree, operation func(t *HashTree) error, notify bool) error {
+func Sync(b *BlobStorage, tree *HashTree, operation func(t *HashTree) error, notify bool, cacheDirs ...string) error {
 	syncTry := 0
 	for {
 		syncTry++
@@ -258,7 +273,7 @@ func Sync(b *BlobStorage, tree *HashTree, operation func(t *HashTree) error, not
 		}
 		log.Warning.Println("remote tree has changed, refresh the file tree")
 	}
-	return saveTree(tree)
+	return saveTree(tree, cacheDirs...)
 }
 
 // DeleteEntry removes an entry: either an empty directory or a file
@@ -269,7 +284,7 @@ func (ctx *ApiCtx) DeleteEntry(node *model.Node, recursive, notify bool) error {
 
 	err := Sync(ctx.blobStorage, ctx.hashTree, func(t *HashTree) error {
 		return t.Remove(node.Document.ID)
-	}, notify)
+	}, notify, ctx.cacheDir)
 	return err
 }
 
@@ -320,7 +335,7 @@ func (ctx *ApiCtx) MoveEntry(src, dstDir *model.Node, name string) (*model.Node,
 		}
 		// defer indexReader.Close()
 		return ctx.blobStorage.UploadBlob(doc.Hash, addExt(doc.DocumentID, archive.DocSchemaExt), indexReader)
-	}, true)
+	}, true, ctx.cacheDir)
 
 	if err != nil {
 		return nil, err
@@ -401,7 +416,7 @@ func (ctx *ApiCtx) UploadDocument(parentId string, sourceDocPath string, notify 
 
 	err = Sync(ctx.blobStorage, ctx.hashTree, func(t *HashTree) error {
 		return t.Add(doc)
-	}, notify)
+	}, notify, ctx.cacheDir)
 
 	if err != nil {
 		return nil, err
@@ -463,7 +478,7 @@ func (ctx *ApiCtx) ReplaceDocumentFile(docId, sourceDocPath string, notify bool)
 			return err
 		}
 		return ctx.blobStorage.UploadBlob(doc.Hash, addExt(doc.DocumentID, archive.DocSchemaExt), indexReader)
-	}, notify)
+	}, notify, ctx.cacheDir)
 }
 
 // DocumentsFileTree reads your remote documents and builds a file tree

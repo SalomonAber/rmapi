@@ -56,6 +56,13 @@ type UserInfo struct {
 	User        string
 }
 
+// Options configures an ApiCtx.
+type Options struct {
+	// CacheDir is the directory in which sync metadata is cached. When empty,
+	// the default is os.UserCacheDir()/rmapi.
+	CacheDir string
+}
+
 func ParseToken(userToken string) (token *UserInfo, err error) {
 	claims := UserToken{}
 	_, _, err = (&jwt.Parser{}).ParseUnverified(userToken, &claims)
@@ -87,9 +94,14 @@ func ParseToken(userToken string) (token *UserInfo, err error) {
 
 // CreateApiCtx initializes an instance of ApiCtx
 func CreateApiCtx(httpCtx *transport.HttpClientCtx, syncVerison SyncVersion) (ctx ApiCtx, err error) {
+	return CreateApiCtxWithOptions(httpCtx, syncVerison, Options{})
+}
+
+// CreateApiCtxWithOptions initializes an instance of ApiCtx with the supplied options.
+func CreateApiCtxWithOptions(httpCtx *transport.HttpClientCtx, syncVerison SyncVersion, options Options) (ctx ApiCtx, err error) {
 	switch syncVerison {
 	case Version15:
-		return sync15.CreateCtx(httpCtx)
+		return sync15.CreateCtxWithOptions(httpCtx, sync15.Options{CacheDir: options.CacheDir})
 	default:
 		log.Fatal("Unsupported sync version")
 	}
