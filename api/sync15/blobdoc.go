@@ -79,12 +79,17 @@ func (d *BlobDoc) MetadataHashAndReader() (hash string, reader io.Reader, err er
 
 func (d *BlobDoc) AddFile(e *Entry) error {
 	d.Files = append(d.Files, e)
+	d.updateSize()
+	return d.Rehash()
+}
+
+// updateSize recomputes the document size from its files.
+func (d *BlobDoc) updateSize() {
 	size := int64(0)
 	for _, f := range d.Files {
 		size += f.Size
 	}
 	d.Size = size
-	return d.Rehash()
 }
 
 func (t *HashTree) Add(d *BlobDoc) error {

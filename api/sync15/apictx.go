@@ -481,6 +481,107 @@ func (ctx *ApiCtx) ReplaceDocumentFile(docId, sourceDocPath string, notify bool)
 	}, notify, ctx.cacheDir)
 }
 
+// ReplaceDocumentFileAt replaces the main document file like ReplaceDocumentFile and, in
+// the same root update, records modified as the document's lastModified and increments its
+// metadata version. ReplaceDocumentFile leaves the version unchanged, so a client that
+// caches document content by version cannot tell that the file changed.
+func (ctx *ApiCtx) ReplaceDocumentFileAt(docId, sourceDocPath string, modified time.Time, notify bool) (*model.Document, error) {
+	_, ext := util.DocPathToName(sourceDocPath)
+	return ctx.updateDocument(docId, notify, func(doc *BlobDoc) error {
+		fileEntry, err := findFileEntry(doc, ext)
+		if err != nil {
+			return err
+		}
+		hash, size, err := FileHashAndSize(sourceDocPath)
+		if err != nil {
+			return err
+		}
+		hashStr := hex.EncodeToString(hash)
+
+		r, err := os.Open(sourceDocPath)
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+
+		if err := ctx.blobStorage.UploadBlob(hashStr, fileEntry.DocumentID, r); err != nil {
+			return err
+		}
+		fileEntry.Hash = hashStr
+		fileEntry.Size = size
+		return ctx.uploadModifiedMetadata(doc, modified)
+	})
+}
+
+// SetLastModified records modified as the document's lastModified and increments its
+// metadata version. The document's other files are left untouched.
+func (ctx *ApiCtx) SetLastModified(docId string, modified time.Time, notify bool) (*model.Document, error) {
+	return ctx.updateDocument(docId, notify, func(doc *BlobDoc) error {
+		return ctx.uploadModifiedMetadata(doc, modified)
+	})
+}
+
+// updateDocument applies update to one document and publishes its new index in a
+// single root update.
+func (ctx *ApiCtx) updateDocument(docId string, notify bool, update func(*BlobDoc) error) (*model.Document, error) {
+	err := Sync(ctx.blobStorage, ctx.hashTree, func(t *HashTree) error {
+		doc, err := t.FindDoc(docId)
+		if err != nil {
+			return err
+		}
+		if err := update(doc); err != nil {
+			return err
+		}
+		doc.updateSize()
+		if err := doc.Rehash(); err != nil {
+			return err
+		}
+		if err := t.Rehash(); err != nil {
+			return err
+		}
+
+		indexReader, err := doc.IndexReader()
+		if err != nil {
+			return err
+		}
+		return ctx.blobStorage.UploadBlob(doc.Hash, addExt(doc.DocumentID, archive.DocSchemaExt), indexReader)
+	}, notify, ctx.cacheDir)
+	if err != nil {
+		return nil, err
+	}
+	doc, err := ctx.hashTree.FindDoc(docId)
+	if err != nil {
+		return nil, err
+	}
+	return doc.ToDocument(), nil
+}
+
+func (ctx *ApiCtx) uploadModifiedMetadata(doc *BlobDoc, modified time.Time) error {
+	hashStr, reader, err := stampLastModified(doc, modified)
+	if err != nil {
+		return err
+	}
+	return ctx.blobStorage.UploadBlob(hashStr, addExt(doc.DocumentID, archive.MetadataExt), reader)
+}
+
+func findFileEntry(doc *BlobDoc, ext string) (*Entry, error) {
+	for _, f := range doc.Files {
+		if strings.HasSuffix(f.DocumentID, "."+ext) {
+			return f, nil
+		}
+	}
+	return nil, fmt.Errorf("document does not contain .%s", ext)
+}
+
+// stampLastModified increments the document's metadata version, records modified in
+// milliseconds as lastModified, and returns the serialized metadata blob.
+func stampLastModified(doc *BlobDoc, modified time.Time) (string, io.Reader, error) {
+	doc.Metadata.Version++
+	doc.Metadata.LastModified = strconv.FormatInt(modified.UnixMilli(), 10)
+	doc.Metadata.MetadataModified = true
+	return doc.MetadataHashAndReader()
+}
+
 // DocumentsFileTree reads your remote documents and builds a file tree
 // structure to represent them
 func DocumentsFileTree(tree *HashTree) *filetree.FileTreeCtx {
